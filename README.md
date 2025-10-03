@@ -106,8 +106,6 @@ The script asks for the same profiles and stack prefix, **confirms destructive a
 - `sso_deployment_guide.md` — **Authoritative** deployment guide for the CloudFormation stacks and parameters
 - `deploy_script.sh` — Interactive wrapper around the CloudFormation workflow to stand everything up
 - `cleanup_script.sh` — Safely tears down stacks and any helper artefacts it generated
-- `presentation_outline.md` — Executive‑friendly presentation outline
-- `cross_account_blog.md` — Long‑form technical blog draft (dev audience)
 
 ---
 
@@ -143,4 +141,5 @@ If you changed the *stack prefix*, use the same prefix when running `cleanup_scr
 - **CloudTrail** in each account records role assumption and S3 data events.
 - Bucket policy **scopes access** to just the intended role principal.
 
-For deeper explanation and trade‑offs (e.g., Identity Center Permission Sets vs bespoke roles), see the blog: ``.
+For deeper explanation and trade‑offs (e.g., Identity Center Permission Sets vs bespoke roles), see the blog: [My Blog](https://akhilkakar.com/blog/cross-account-resource-access)
+.
