@@ -1,0 +1,61 @@
+# ----- OS cruft -----
+.DS_Store
+Thumbs.db
+
+# ----- Editors / IDEs -----
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*.kate-swp
+.history/
+*.code-workspace
+
+# ----- Logs & temp -----
+*.log
+*.tmp
+*.temp
+*.bak
+*.old
+
+# ----- Local env / secrets (never commit credentials) -----
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.crt
+*.der
+*.jks
+credentials*
+secrets.*
+*.aws-sso-cache/
+.aws-sso/*
+
+# ----- Node / Python (if used in examples) -----
+node_modules/
+dist/
+build/
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# ----- Mac archive files -----
+*.zip
+*.tar
+*.tar.gz
+
+# ----- Generated artefacts from demos/tests -----
+test-object.txt
+downloaded.txt
+cross-account-tests/
+
+# ----- Presentation exports -----
+*.pptx
+*.pdf
+
+# ----- Local tooling -----
+*.local.*
+*.override.*
