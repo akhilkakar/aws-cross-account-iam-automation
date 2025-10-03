@@ -1,0 +1,170 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Cross-Account IAM Role for S3 Access (Account B - Production/Resource Account)'
+
+Parameters:
+  TrustedAccountId:
+    Type: String
+    Description: Account ID of Account A (Development) that will assume this role
+    AllowedPattern: '^\d{12}$'
+    ConstraintDescription: Must be a valid 12-digit AWS Account ID
+  
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket to grant access to (must already exist)
+    MinLength: 3
+    MaxLength: 63
+    AllowedPattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+    ConstraintDescription: Must be a valid S3 bucket name
+  
+  RoleName:
+    Type: String
+    Description: Name of the IAM role to create in Account B
+    Default: CrossAccountS3Access
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: '[\w+=,.@-]+'
+    ConstraintDescription: Must be a valid IAM role name
+  
+  ExternalId:
+    Type: String
+    Description: External ID for additional security (recommended best practice)
+    Default: CrossAccountAccess-2024
+    MinLength: 2
+    MaxLength: 1224
+  
+  MaxSessionDuration:
+    Type: Number
+    Description: Maximum session duration in seconds (3600 = 1 hour, 43200 = 12 hours)
+    Default: 3600
+    MinValue: 3600
+    MaxValue: 43200
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Cross-Account Configuration
+        Parameters:
+          - TrustedAccountId
+          - ExternalId
+      - Label:
+          default: Role Configuration
+        Parameters:
+          - RoleName
+          - MaxSessionDuration
+      - Label:
+          default: Resource Access
+        Parameters:
+          - S3BucketName
+    
+    ParameterLabels:
+      TrustedAccountId:
+        default: Trusted AWS Account ID (Account A)
+      S3BucketName:
+        default: S3 Bucket Name
+      RoleName:
+        default: IAM Role Name
+      ExternalId:
+        default: External ID
+      MaxSessionDuration:
+        default: Max Session Duration (seconds)
+
+Resources:
+  CrossAccountS3AccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      Description: !Sub 'Cross-account role for S3 access from Account ${TrustedAccountId}'
+      MaxSessionDuration: !Ref MaxSessionDuration
+      
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowAssumeRoleFromTrustedAccount
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${TrustedAccountId}:root'
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                'sts:ExternalId': !Ref ExternalId
+      
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowS3BucketListing
+                Effect: Allow
+                Action:
+                  - 's3:ListBucket'
+                  - 's3:GetBucketLocation'
+                  - 's3:GetBucketVersioning'
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}'
+              
+              - Sid: AllowS3ObjectOperations
+                Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                  - 's3:GetObjectVersion'
+                  - 's3:GetObjectMetadata'
+                  - 's3:GetObjectAttributes'
+                  - 's3:PutObject'
+                  - 's3:PutObjectAcl'
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}/*'
+      
+      Tags:
+        - Key: Purpose
+          Value: CrossAccountAccess
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: TrustedAccount
+          Value: !Ref TrustedAccountId
+        - Key: Environment
+          Value: Production
+
+Outputs:
+  RoleArn:
+    Description: ARN of the created IAM role
+    Value: !GetAtt CrossAccountS3AccessRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleArn'
+  
+  RoleName:
+    Description: Name of the created IAM role
+    Value: !Ref RoleName
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleName'
+  
+  S3BucketName:
+    Description: S3 bucket name that this role can access
+    Value: !Ref S3BucketName
+  
+  TrustedAccountId:
+    Description: AWS Account ID that can assume this role
+    Value: !Ref TrustedAccountId
+  
+  ExternalId:
+    Description: External ID required to assume this role (SAVE THIS!)
+    Value: !Ref ExternalId
+  
+  MaxSessionDuration:
+    Description: Maximum session duration in seconds
+    Value: !Ref MaxSessionDuration
+  
+  AssumeRoleCommand:
+    Description: AWS CLI command to assume this role from Account A
+    Value: !Sub |
+      aws sts assume-role \
+        --role-arn ${CrossAccountS3AccessRole.Arn} \
+        --role-session-name MySession \
+        --external-id ${ExternalId} \
+        --profile admin-dev
+  
+  NextSteps:
+    Description: What to do next
+    Value: !Sub |
+      1. Save the External ID: ${ExternalId}
+      2. Save the Role ARN: ${CrossAccountS3AccessRole.Arn}
+      3. Deploy the Account A stack with these values
+      4. Test the cross-account access

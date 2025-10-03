@@ -1,0 +1,226 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Cross-Account IAM Role with AssumeRole Permission (Account A - Development/Assuming Account)'
+
+Parameters:
+  AccountBRoleArn:
+    Type: String
+    Description: ARN of the role in Account B (Production) to assume
+    AllowedPattern: '^arn:aws:iam::\d{12}:role/[\w+=,.@-]+$'
+    ConstraintDescription: Must be a valid IAM Role ARN
+  
+  AccountBAccountId:
+    Type: String
+    Description: Account ID of Account B (Production)
+    AllowedPattern: '^\d{12}$'
+    ConstraintDescription: Must be a valid 12-digit AWS Account ID
+  
+  RoleName:
+    Type: String
+    Description: Name of the IAM role to create in Account A
+    Default: CrossAccountS3AccessAssumer
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: '[\w+=,.@-]+'
+    ConstraintDescription: Must be a valid IAM role name
+  
+  TrustedPrincipals:
+    Type: CommaDelimitedList
+    Description: AWS service principals that can assume this role (e.g., ec2.amazonaws.com, lambda.amazonaws.com)
+    Default: 'ec2.amazonaws.com'
+  
+  UseSSO:
+    Type: String
+    Description: Whether this role is for SSO users or AWS services
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+
+Conditions:
+  UseSSO: !Equals [!Ref UseSSO, 'true']
+  NotUseSSO: !Not [!Equals [!Ref UseSSO, 'true']]
+
+Resources:
+  # Role for AWS SSO users
+  AssumeRolePermissionSSO:
+    Type: AWS::IAM::Role
+    Condition: UseSSO
+    Properties:
+      RoleName: !Ref RoleName
+      Description: !Sub 'Role for AWS SSO users to assume role in Account ${AccountBAccountId}'
+      
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Allow AWS SSO users to assume this role
+          - Sid: AllowSSOUsers
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringLike:
+                'aws:PrincipalArn': !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-reserved/sso.amazonaws.com/*'
+      
+      Policies:
+        - PolicyName: AssumeAccountBRolePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowAssumeRoleInAccountB
+                Effect: Allow
+                Action: 'sts:AssumeRole'
+                Resource: !Ref AccountBRoleArn
+      
+      Tags:
+        - Key: Purpose
+          Value: CrossAccountAccess
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: TargetAccount
+          Value: !Ref AccountBAccountId
+        - Key: Environment
+          Value: Development
+        - Key: AccessType
+          Value: SSO
+
+  # Role for AWS Services (EC2, Lambda, etc.)
+  AssumeRolePermissionServices:
+    Type: AWS::IAM::Role
+    Condition: NotUseSSO
+    Properties:
+      RoleName: !Ref RoleName
+      Description: !Sub 'Role for AWS services to assume role in Account ${AccountBAccountId}'
+      
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowAWSServices
+            Effect: Allow
+            Principal:
+              Service: !Ref TrustedPrincipals
+            Action: 'sts:AssumeRole'
+      
+      Policies:
+        - PolicyName: AssumeAccountBRolePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowAssumeRoleInAccountB
+                Effect: Allow
+                Action: 'sts:AssumeRole'
+                Resource: !Ref AccountBRoleArn
+      
+      Tags:
+        - Key: Purpose
+          Value: CrossAccountAccess
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: TargetAccount
+          Value: !Ref AccountBAccountId
+        - Key: Environment
+          Value: Development
+        - Key: AccessType
+          Value: Service
+
+  # Optional: Instance Profile for EC2 (only created if not using SSO)
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: NotUseSSO
+    Properties:
+      InstanceProfileName: !Sub '${RoleName}-InstanceProfile'
+      Roles:
+        - !Ref AssumeRolePermissionServices
+
+Outputs:
+  RoleArn:
+    Description: ARN of the created IAM role in Account A
+    Value: !If
+      - UseSSO
+      - !GetAtt AssumeRolePermissionSSO.Arn
+      - !GetAtt AssumeRolePermissionServices.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleArn'
+  
+  RoleName:
+    Description: Name of the created IAM role
+    Value: !Ref RoleName
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleName'
+  
+  InstanceProfileArn:
+    Condition: NotUseSSO
+    Description: ARN of the instance profile (for EC2)
+    Value: !GetAtt EC2InstanceProfile.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceProfileArn'
+  
+  InstanceProfileName:
+    Condition: NotUseSSO
+    Description: Name of the instance profile (for EC2)
+    Value: !Ref EC2InstanceProfile
+  
+  TargetRoleArn:
+    Description: ARN of the role in Account B that can be assumed
+    Value: !Ref AccountBRoleArn
+  
+  UsageForSSOUsers:
+    Condition: UseSSO
+    Description: How SSO users can use this
+    Value: !Sub |
+      As an SSO user in Account A, you need to:
+      
+      1. Assume this role first (SSO users can't directly assume cross-account roles):
+         aws sts assume-role \
+           --role-arn ${RoleName} \
+           --role-session-name MyLocalSession \
+           --profile admin-dev
+      
+      2. Use those credentials to assume the Account B role:
+         aws sts assume-role \
+           --role-arn ${AccountBRoleArn} \
+           --role-session-name CrossAccountSession \
+           --external-id CrossAccountAccess-2024
+      
+      OR use the helper script: examples/cli/sso_assume_role.sh
+  
+  UsageForServices:
+    Condition: NotUseSSO
+    Description: How to use this role with AWS services
+    Value: !Sub |
+      Attach this role to EC2 instances or Lambda functions.
+      They will automatically be able to assume: ${AccountBRoleArn}
+      
+      Example Python code:
+      import boto3
+      sts = boto3.client('sts')
+      response = sts.assume_role(
+          RoleArn='${AccountBRoleArn}',
+          RoleSessionName='MySession',
+          ExternalId='CrossAccountAccess-2024'
+      )
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Cross-Account Configuration
+        Parameters:
+          - AccountBRoleArn
+          - AccountBAccountId
+      - Label:
+          default: Role Configuration
+        Parameters:
+          - RoleName
+          - UseSSO
+          - TrustedPrincipals
+    
+    ParameterLabels:
+      AccountBRoleArn:
+        default: Account B Role ARN
+      AccountBAccountId:
+        default: Account B Account ID
+      RoleName:
+        default: IAM Role Name
+      UseSSO:
+        default: Role Type
+      TrustedPrincipals:
+        default: Trusted Service Principals
